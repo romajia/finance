@@ -95,7 +95,19 @@
   const fmt=n=>'NT$ '+Math.round(n||0).toLocaleString('en-US');
   const nfmt=(n,d=2)=>Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
   const signedPct=n=>(n>=0?'+':'−')+Math.abs(n).toFixed(2)+'%';
+  const appUrl=path=>new URL(path,document.baseURI).toString();
+  async function loadStaticSnapshot(){
+    const url=new URL('northstar-market-cache.json',document.baseURI);url.searchParams.set('_',Date.now());
+    const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw Error(`網站資料快照讀取失敗（${response.status}）`);
+    const snapshot=await response.json();
+    if(!Array.isArray(snapshot.market?.history)||snapshot.market.history.length<60)throw Error('網站資料快照不足 60 筆淨值');
+    return {
+      market:{...snapshot.market,cacheHit:true,staticSnapshot:true},
+      dividends:{...(snapshot.dividends||{}),dividends:Array.isArray(snapshot.dividends?.dividends)?snapshot.dividends.dividends:[],cacheHit:true,staticSnapshot:true}
+    };
+  }
   let active=0, history=[], dividends=[], marketHistoryLive=[], distributionsLive=[], dataMode='demo', period='1Y', busy=false, lastScheduleMarker='';
+  let staticSnapshotMode=false;
   let initialNav=funds[0].nav, manualNav=false;
 
   function demoHistory(fund){
@@ -173,18 +185,25 @@
   function formatDate(s){return s&&s.length===8?`${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}`:s||'—'}
   function setFund(index){active=index;manualNav=false;const f=currentFund();$('fundSelect').value=String(index);$('fundCode').textContent=f.code;$('fundDataType').textContent=f.live?'連線同步':'模擬數據';$('currentNav').value=f.nav.toFixed(2);$('distribution').value=f.dividend?f.dividend.toFixed(4):'0';$('navDate').textContent=`結算 ${f.date}`;$('distributionDate').textContent=f.distDate==='—'?'配息資料未連線':`最近公告 ${f.distDate}`;$('statusDot').className='status-dot'+(isLiveActive()?' live':'');$('syncStatus').textContent=f.live?(isLiveActive()?'已同步基金淨值與配息':'示意模式 · 待連線'):'此基金顯示示意數據，尚未連接歷史來源';history=isLiveActive()?marketHistoryLive:(index===0?[]:demoHistory(f));dividends=isLiveActive()?distributionsLive:[];calculate();}
   async function sync(fromCache=false,quiet=false,freshSnapshot=false){
-    if(busy)return;busy=true;$('statusDot').className='status-dot busy';$('syncStatus').textContent=fromCache?'載入上次同步的一年淨值快取…':'正在同步最近一年淨值與配息紀錄…';
+    if(busy)return;busy=true;$('statusDot').className='status-dot busy';$('syncStatus').textContent=fromCache?'載入上次同步的一年淨值快取…':'正在更新最近一年淨值與配息紀錄…';
     try{
       const cached=fromCache?'&cached=1':'';
-      const [m,d]=await Promise.all([fetch(`/api/market?fund=ACPS63${cached}`,{cache:'no-store'}),fetch(`/api/dividends?fund=A07049${cached}`,{cache:'no-store'})]);
-      if(!m.ok||!d.ok)throw Error('API 回應失敗');
-      const market=await m.json(),dist=await d.json();if(!Array.isArray(market.history)||market.history.length<60)throw Error('歷史淨值不足 60 筆');
-      marketHistoryLive=market.history;distributionsLive=Array.isArray(dist.dividends)?dist.dividends:[];dataMode=freshSnapshot?'live':market.cacheHit?'cached':'live';
+      let market,dist;
+      try{
+        const [m,d]=await Promise.all([fetch(appUrl(`api/market?fund=ACPS63${cached}`),{cache:'no-store'}),fetch(appUrl(`api/dividends?fund=A07049${cached}`),{cache:'no-store'})]);
+        if(!m.ok||!d.ok)throw Error('API 回應失敗');
+        market=await m.json();dist=await d.json();
+      }catch(apiError){
+        const snapshot=await loadStaticSnapshot();market=snapshot.market;dist=snapshot.dividends;staticSnapshotMode=true;
+      }
+      if(!Array.isArray(market.history)||market.history.length<60)throw Error('歷史淨值不足 60 筆');
+      if(!market.staticSnapshot)staticSnapshotMode=false;
+      marketHistoryLive=market.history;distributionsLive=Array.isArray(dist.dividends)?dist.dividends:[];dataMode=market.staticSnapshot?'cached':freshSnapshot?'live':market.cacheHit?'cached':'live';
       funds[0].nav=marketHistoryLive.at(-1).nav;funds[0].date=formatDate(marketHistoryLive.at(-1).date);funds[0].prev=marketHistoryLive.at(-2)?.nav||funds[0].prev;
       if(distributionsLive.length){funds[0].dividend=distributionsLive.at(-1).amount;funds[0].distDate=formatDate(distributionsLive.at(-1).recordDate.replaceAll('/','').replaceAll('-',''));}
       if(active===0){history=marketHistoryLive;dividends=distributionsLive;if(!manualNav)$('currentNav').value=funds[0].nav.toFixed(2);$('navDate').textContent=`結算 ${funds[0].date}`;$('distributionDate').textContent=`最近公告 ${funds[0].distDate}`;$('distribution').value=funds[0].dividend.toFixed(4);calculate();}
-      $('statusDot').className='status-dot'+(active===0?' live':'');$('syncStatus').textContent=active===0?(market.cacheHit&&!freshSnapshot?`顯示上次同步資料 ${funds[0].date} · 正在更新`:`已載入 ${funds[0].date} 淨值 · ${market.history.length} 筆歷史`):'此基金顯示示意數據；高息基金已更新';
-      $('updatedAt').textContent=`資料更新 ${new Date(market.updatedAt).toLocaleString('zh-TW',{hour12:false})} · ${market.source}`;if(!quiet)notify(fromCache?'已載入快取淨值資料':'已同步一年淨值與配息紀錄');
+      $('statusDot').className='status-dot'+(active===0&&!market.staticSnapshot?' live':'');$('syncStatus').textContent=active===0?(market.staticSnapshot?`已載入網站資料快照 ${funds[0].date} · 靜態頁模式`:market.cacheHit&&!freshSnapshot?`顯示上次同步資料 ${funds[0].date} · 正在更新`:`已載入 ${funds[0].date} 淨值 · ${market.history.length} 筆歷史`):'此基金顯示示意數據；高息基金已更新';
+      $('updatedAt').textContent=`資料更新 ${new Date(market.updatedAt).toLocaleString('zh-TW',{hour12:false})} · ${market.source||'網站資料快照'}`;if(!quiet)notify(market.staticSnapshot?'已載入網站最新資料快照':fromCache?'已載入快取淨值資料':'已同步一年淨值與配息紀錄');
     }catch(err){
       if(active===0){const hasSaved=marketHistoryLive.length>=60;dataMode=hasSaved?'cached':'demo';history=hasSaved?marketHistoryLive:[];dividends=hasSaved?distributionsLive:[];$('statusDot').className='status-dot';$('syncStatus').textContent=hasSaved?`即時更新失敗 · 顯示上次同步資料 ${funds[0].date}`:'無法連線 · 請確認本機同步服務';$('updatedAt').textContent=hasSaved?'使用最近一次已儲存的一年資料':'等待同步服務';calculate();}
     }finally{busy=false}
@@ -195,9 +214,9 @@
   document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{$('capital').value=b.dataset.capital;calculate()}));
   ['capital','costNav','currentNav','distribution','manualMa','exDate'].forEach(id=>$(id).addEventListener('input',()=>{if(id==='currentNav')manualNav=true;calculate()}));$('exDate').addEventListener('change',updateCountdown);
   document.querySelectorAll('#periodTabs button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#periodTabs button').forEach(x=>x.classList.toggle('active',x===b));period=b.dataset.period;drawChart()}));
-  async function checkScheduledUpdate(){try{const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)return;const status=await response.json();if(status.lastScheduledCheckAt&&status.lastScheduledCheckAt!==lastScheduleMarker){lastScheduleMarker=status.lastScheduledCheckAt;if(status.lastScheduledStatus==='updated')await sync(true,true,true);else if(status.lastScheduledStatus==='no-nav')$('syncStatus').textContent='今日尚無新淨值；排程稍後再檢查';else if(status.lastScheduledStatus==='error')$('syncStatus').textContent='18:00 來源暫時無回應；排程稍後重試';}}catch(_){}}
+  async function checkScheduledUpdate(){if(staticSnapshotMode)return;try{const response=await fetch(appUrl('api/status'),{cache:'no-store'});if(!response.ok)return;const status=await response.json();if(status.lastScheduledCheckAt&&status.lastScheduledCheckAt!==lastScheduleMarker){lastScheduleMarker=status.lastScheduledCheckAt;if(status.lastScheduledStatus==='updated')await sync(true,true,true);else if(status.lastScheduledStatus==='no-nav')$('syncStatus').textContent='今日尚無新淨值；排程稍後再檢查';else if(status.lastScheduledStatus==='error')$('syncStatus').textContent='18:00 來源暫時無回應；排程稍後重試';}}catch(_){}}
   restoreInputs();history=[];dividends=[];calculate();
-  (async()=>{try{const r=await fetch('/api/status',{cache:'no-store'});if(r.ok){const s=await r.json();lastScheduleMarker=s.lastScheduledCheckAt||'';if(s.hasMarketCache)await sync(true,true)}}catch(_){}await sync(false,true);setInterval(checkScheduledUpdate,60*1000)})();
+  (async()=>{try{const r=await fetch(appUrl('api/status'),{cache:'no-store'});if(r.ok){const s=await r.json();lastScheduleMarker=s.lastScheduledCheckAt||'';if(s.hasMarketCache)await sync(true,true)}}catch(_){}await sync(false,true);setInterval(checkScheduledUpdate,60*1000)})();
 </script>
 </body>
 </html>
