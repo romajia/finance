@@ -63,7 +63,7 @@
 
   <section class="main-grid">
     <article class="card chart-card">
-      <div class="chart-header"><div><h2>淨值走勢 × 含息還原 × 60MA</h2><p id="chartDescription">含息線按已公告配息於除息日再投資推估；如未載入配息紀錄，顯示淨值與均線。</p></div><div class="periods" id="periodTabs"><button data-period="1M">月</button><button data-period="3M" class="active">季</button><button data-period="6M">半年</button><button data-period="1Y">一年</button></div></div>
+      <div class="chart-header"><div><h2>淨值走勢 × 含息還原 × 60MA</h2><p id="chartDescription">含息線按已公告配息於除息日再投資推估；如未載入配息紀錄，顯示淨值與均線。</p></div><div class="periods" id="periodTabs"><button data-period="1M">月</button><button data-period="3M">季</button><button data-period="6M">半年</button><button data-period="1Y" class="active">一年</button></div></div>
       <div class="legend"><span><i class="raw"></i>原始淨值</span><span><i></i>含息還原（再投資）</span><span><i class="ma"></i>60MA</span><span><i class="cost"></i>個人成本</span></div>
       <div class="chart-box" id="mainChart" role="img" aria-label="基金淨值及含息走勢圖"></div>
       <div class="chart-foot" id="chartFoot">來源：—。若使用示意模式，圖中路徑非基金歷史資料。<br><strong>成本線：</strong><span id="costLineText">尚未輸入平均買進成本</span></div>
@@ -95,7 +95,7 @@
   const fmt=n=>'NT$ '+Math.round(n||0).toLocaleString('en-US');
   const nfmt=(n,d=2)=>Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
   const signedPct=n=>(n>=0?'+':'−')+Math.abs(n).toFixed(2)+'%';
-  let active=0, history=[], dividends=[], marketHistoryLive=[], distributionsLive=[], dataMode='demo', period='3M', busy=false, lastScheduleMarker='';
+  let active=0, history=[], dividends=[], marketHistoryLive=[], distributionsLive=[], dataMode='demo', period='1Y', busy=false, lastScheduleMarker='';
   let initialNav=funds[0].nav, manualNav=false;
 
   function demoHistory(fund){
@@ -113,7 +113,7 @@
   function notify(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2400)}
   function updateCountdown(){const v=$('exDate').value;if(!v){$('countdownBadge').textContent='除息日未設定';return}const d=new Date(v+'T00:00:00'),today=new Date();today.setHours(0,0,0,0);const days=Math.ceil((d-today)/86400000);$('countdownBadge').textContent=days<0?'除息日期已過':`距自訂除息日 ${days} 天`;}
   function currentFund(){return funds[active]}
-  function isLiveActive(){return active===0&&dataMode==='live'}
+  function isLiveActive(){return active===0&&(dataMode==='live'||dataMode==='cached')}
   function movingAverage(data,n=60){if(data.length<n)return null;return data.slice(-n).reduce((a,p)=>a+p.nav,0)/n}
   function totalReturnSeries(data,distRows){
     if(!data.length)return[];const divs=new Map(distRows.map(x=>[x.exDate.replaceAll('/','').replaceAll('-',''),x.amount]));let units=1;
@@ -139,8 +139,8 @@
     let costLine='';if(withCost){const yy=y(cost);costLine=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#fbbf24" stroke-width="1.4" stroke-dasharray="5 5"/><text x="${W-R-2}" y="${yy-5}" text-anchor="end" fill="#fbbf24" font-size="${axisFont}">個人成本 ${nfmt(cost)}</text>`;$('costLineText').textContent=`${nfmt(cost)} 元／單位 · 目前價格線為個人輸入成本`;}else $('costLineText').textContent='尚未輸入平均買進成本';
     const points=total.map((p,i)=>i%Math.max(1,Math.floor(total.length/9))===0&&i>0?`<circle cx="${x(i)}" cy="${y(p.total)}" r="2" fill="#38bdf8"/>`:'' ).join('');
     box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="淨值與含息還原走勢圖">${yGrid}<path d="${totalPath}" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>${points}<path d="${rawPath}" fill="none" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="${maPath}" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 5"/>${costLine}${labels}</svg>`;
-    const src=manualNav&&active===0?'淨值歷史＋手動估值情境':isLiveActive()?'MoneyDJ 一年淨值歷史':'離線示意路徑（非基金歷史）';
-    $('chartDescription').textContent=isLiveActive()?'含息還原依已公告配息與除息日逐筆再投資計算。':'目前為離線或手動估值情境；官方淨值歷史未必已同步。';
+    const src=manualNav&&active===0?'淨值歷史＋手動估值情境':dataMode==='cached'&&active===0?'上次同步的一年淨值快取':'MoneyDJ 一年淨值歷史';
+    $('chartDescription').textContent=isLiveActive()?'含息還原依已公告配息與除息日逐筆再投資計算。':'目前顯示示意資料；連線後載入來源淨值歷史。';
     $('chartFoot').innerHTML=`圖表資料：<strong>${src}</strong> · ${data.length} 點；含息線依已公告配息於除息日再投資推估。<br><strong>成本線：</strong><span id="costLineText">${withCost?nfmt(cost)+' 元／單位':'尚未輸入平均買進成本'}</span>`;
   }
   function renderDividends(){
@@ -165,23 +165,39 @@
     $('yieldValue').textContent=yieldNow.toFixed(2)+'%';$('yieldCost').textContent=`成本殖利率 ${yieldCost.toFixed(2)}% · 以目前單位配息年化`;
     const fNav=f.nav;$('kpiNav').textContent=nfmt(nav);$('kpiYield').textContent=yieldNow.toFixed(2)+'%';$('kpiDist').textContent=`最近一期 ${dist.toFixed(4)} 元／單位 · ${f.distDate}`;
     const maInput=Number($('manualMa').value),ma=(Number.isFinite(maInput)&&maInput>0)?maInput:movingAverage(history);const bias=ma?((nav/ma)-1)*100:null;
-    if(ma){$('kpiBias').textContent=signedPct(bias);$('biasStatus').textContent=Number.isFinite(maInput)&&maInput>0?'自訂 60MA 情境':'由最近 60 筆淨值計算';$('maNote').textContent=`60MA ${nfmt(ma)} 元 · ${dataMode==='live'?'來源淨值資料':'離線資料示意'}`;$('gaugeValue').textContent=signedPct(bias);$('radarState').textContent=bias< -8?'均線下方':bias>10?'均線上方':'均線附近';$('radarState').className='badge '+(bias< -8?'green':bias>10?'amber':'blue');$('gaugeNeedle').setAttribute('transform',`rotate(${Math.max(-86,Math.min(86,bias/15*86))} 130 143)`);$('zoneMarker').style.left=Math.max(0,Math.min(100,(bias+15)/30*100))+'%';$('gaugeExplanation').innerHTML=`<strong>目前相對均線 ${signedPct(bias)}：</strong>${bias< -8?'淨值低於均線較多，仍可能繼續下跌。':bias>10?'淨值高於均線較多，短期波動仍可能擴大。':'淨值位於均線周邊。'}這是歷史位置描述，非買賣訊號。`;}else{$('kpiBias').textContent='—';$('biasStatus').textContent='等待至少 60 筆淨值';$('maNote').textContent='均線未計算；不推斷進場位置。';$('gaugeValue').textContent='—';$('radarState').textContent='資料不足';$('radarState').className='badge gray';$('gaugeExplanation').textContent='目前無足夠歷史淨值，無法計算 60MA。偏離率是描述性指標，單獨使用不代表進場訊號。';}
+    if(ma){$('kpiBias').textContent=signedPct(bias);$('biasStatus').textContent=Number.isFinite(maInput)&&maInput>0?'自訂 60MA 情境':'由最近 60 筆淨值計算';$('maNote').textContent=`60MA ${nfmt(ma)} 元 · ${isLiveActive()?'來源淨值資料':'離線資料示意'}`;$('gaugeValue').textContent=signedPct(bias);$('radarState').textContent=bias< -8?'均線下方':bias>10?'均線上方':'均線附近';$('radarState').className='badge '+(bias< -8?'green':bias>10?'amber':'blue');$('gaugeNeedle').setAttribute('transform',`rotate(${Math.max(-86,Math.min(86,bias/15*86))} 130 143)`);$('zoneMarker').style.left=Math.max(0,Math.min(100,(bias+15)/30*100))+'%';$('gaugeExplanation').innerHTML=`<strong>目前相對均線 ${signedPct(bias)}：</strong>${bias< -8?'淨值低於均線較多，仍可能繼續下跌。':bias>10?'淨值高於均線較多，短期波動仍可能擴大。':'淨值位於均線周邊。'}這是歷史位置描述，非買賣訊號。`;}else{$('kpiBias').textContent='—';$('biasStatus').textContent='等待至少 60 筆淨值';$('maNote').textContent='均線未計算；不推斷進場位置。';$('gaugeValue').textContent='—';$('radarState').textContent='資料不足';$('radarState').className='badge gray';$('gaugeExplanation').textContent='目前無足夠歷史淨值，無法計算 60MA。偏離率是描述性指標，單獨使用不代表進場訊號。';}
     const tr=totalReturnSeries(history,active===0?dividends:[]);let peak=-Infinity,dd=0;for(const p of tr){peak=Math.max(peak,p.total);if(peak>0)dd=Math.min(dd,(p.total/peak-1)*100)}$('kpiDrawdown').textContent=tr.length?signedPct(dd):'—';$('drawdownSub').textContent=tr.length?(isLiveActive()?'觀察區間最大回撤 · 含息再投資估算':'離線示意，不代表歷史實際回撤'):'等待歷史淨值與配息';
     if(history.length>1){const ch=(nav-history.at(-2).nav)/history.at(-2).nav*100;$('kpiChange').textContent=`${signedPct(ch)} · 淨值日期 ${formatDate(history.at(-1).date)}`;const recent=history.slice(-22),lo=Math.min(...recent.map(p=>p.nav)),hi=Math.max(...recent.map(p=>p.nav));$('rangeNote').innerHTML=`近 22 筆高低：<strong>${nfmt(hi)}</strong> / <strong>${nfmt(lo)}</strong>`;}else{$('kpiChange').textContent=`最近可用日期 ${f.date} · ${dataMode==='live'?'已同步':'未連線'}`;$('rangeNote').textContent='待取得淨值歷史資料';}
     drawChart();renderDividends();renderEvents();updateCountdown();persistInputs();
   }
   function formatDate(s){return s&&s.length===8?`${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}`:s||'—'}
-  function setFund(index){active=index;manualNav=false;const f=currentFund();$('fundSelect').value=String(index);$('fundCode').textContent=f.code;$('fundDataType').textContent=f.live?'連線同步':'模擬數據';$('currentNav').value=f.nav.toFixed(2);$('distribution').value=f.dividend?f.dividend.toFixed(4):'0';$('navDate').textContent=`結算 ${f.date}`;$('distributionDate').textContent=f.distDate==='—'?'配息資料未連線':`最近公告 ${f.distDate}`;$('statusDot').className='status-dot'+(isLiveActive()?' live':'');$('syncStatus').textContent=f.live?(isLiveActive()?'已同步基金淨值與配息':'示意模式 · 待連線'):'此基金顯示示意數據，尚未連接歷史來源';history=isLiveActive()?marketHistoryLive:demoHistory(f);dividends=isLiveActive()?distributionsLive:[];calculate();}
-  async function sync(fromCache=false){if(busy)return;busy=true;$('statusDot').className='status-dot busy';$('syncStatus').textContent=fromCache?'已完成 18:00 排程更新，載入同步資料…':'正在同步一年淨值與配息紀錄…';try{const cached=fromCache?'&cached=1':'';const [m,d]=await Promise.all([fetch(`/api/market?fund=ACPS63${cached}`,{cache:'no-store'}),fetch(`/api/dividends?fund=A07049${cached}`,{cache:'no-store'})]);if(!m.ok||!d.ok)throw Error('API 回應失敗');const market=await m.json(),dist=await d.json();if(!Array.isArray(market.history)||market.history.length<60)throw Error('歷史淨值不足 60 筆');marketHistoryLive=market.history;distributionsLive=Array.isArray(dist.dividends)?dist.dividends:[];dataMode='live';funds[0].nav=marketHistoryLive.at(-1).nav;funds[0].date=formatDate(marketHistoryLive.at(-1).date);funds[0].prev=marketHistoryLive.at(-2)?.nav||funds[0].prev;if(distributionsLive.length){funds[0].dividend=distributionsLive.at(-1).amount;funds[0].distDate=formatDate(distributionsLive.at(-1).recordDate.replaceAll('/','').replaceAll('-',''));}if(active===0){history=marketHistoryLive;dividends=distributionsLive;if(!manualNav)$('currentNav').value=funds[0].nav.toFixed(2);$('navDate').textContent=`結算 ${funds[0].date}`;$('distributionDate').textContent=`最近公告 ${funds[0].distDate}`;$('distribution').value=funds[0].dividend.toFixed(4);calculate();}$('statusDot').className='status-dot'+(active===0?' live':'');$('syncStatus').textContent=active===0?`已同步 ${funds[0].date} 淨值 · 每日 18:00 自動檢查`:'此基金顯示示意數據；高息基金已更新';$('updatedAt').textContent=`同步時間 ${new Date().toLocaleString('zh-TW',{hour12:false})} · ${market.source}`;notify(fromCache?'已載入 18:00 排程同步資料':'已同步淨值歷史與配息紀錄');}catch(err){dataMode='demo';marketHistoryLive=[];distributionsLive=[];if(active===0){history=demoHistory(funds[0]);dividends=[];$('statusDot').className='status-dot';$('syncStatus').textContent='連線服務未啟動 · 顯示示意資料';$('updatedAt').textContent='示意模式；執行 node server.js 啟用連線';calculate();}}finally{busy=false}}
+  function setFund(index){active=index;manualNav=false;const f=currentFund();$('fundSelect').value=String(index);$('fundCode').textContent=f.code;$('fundDataType').textContent=f.live?'連線同步':'模擬數據';$('currentNav').value=f.nav.toFixed(2);$('distribution').value=f.dividend?f.dividend.toFixed(4):'0';$('navDate').textContent=`結算 ${f.date}`;$('distributionDate').textContent=f.distDate==='—'?'配息資料未連線':`最近公告 ${f.distDate}`;$('statusDot').className='status-dot'+(isLiveActive()?' live':'');$('syncStatus').textContent=f.live?(isLiveActive()?'已同步基金淨值與配息':'示意模式 · 待連線'):'此基金顯示示意數據，尚未連接歷史來源';history=isLiveActive()?marketHistoryLive:(index===0?[]:demoHistory(f));dividends=isLiveActive()?distributionsLive:[];calculate();}
+  async function sync(fromCache=false,quiet=false,freshSnapshot=false){
+    if(busy)return;busy=true;$('statusDot').className='status-dot busy';$('syncStatus').textContent=fromCache?'載入上次同步的一年淨值快取…':'正在同步最近一年淨值與配息紀錄…';
+    try{
+      const cached=fromCache?'&cached=1':'';
+      const [m,d]=await Promise.all([fetch(`/api/market?fund=ACPS63${cached}`,{cache:'no-store'}),fetch(`/api/dividends?fund=A07049${cached}`,{cache:'no-store'})]);
+      if(!m.ok||!d.ok)throw Error('API 回應失敗');
+      const market=await m.json(),dist=await d.json();if(!Array.isArray(market.history)||market.history.length<60)throw Error('歷史淨值不足 60 筆');
+      marketHistoryLive=market.history;distributionsLive=Array.isArray(dist.dividends)?dist.dividends:[];dataMode=freshSnapshot?'live':market.cacheHit?'cached':'live';
+      funds[0].nav=marketHistoryLive.at(-1).nav;funds[0].date=formatDate(marketHistoryLive.at(-1).date);funds[0].prev=marketHistoryLive.at(-2)?.nav||funds[0].prev;
+      if(distributionsLive.length){funds[0].dividend=distributionsLive.at(-1).amount;funds[0].distDate=formatDate(distributionsLive.at(-1).recordDate.replaceAll('/','').replaceAll('-',''));}
+      if(active===0){history=marketHistoryLive;dividends=distributionsLive;if(!manualNav)$('currentNav').value=funds[0].nav.toFixed(2);$('navDate').textContent=`結算 ${funds[0].date}`;$('distributionDate').textContent=`最近公告 ${funds[0].distDate}`;$('distribution').value=funds[0].dividend.toFixed(4);calculate();}
+      $('statusDot').className='status-dot'+(active===0?' live':'');$('syncStatus').textContent=active===0?(market.cacheHit&&!freshSnapshot?`顯示上次同步資料 ${funds[0].date} · 正在更新`:`已載入 ${funds[0].date} 淨值 · ${market.history.length} 筆歷史`):'此基金顯示示意數據；高息基金已更新';
+      $('updatedAt').textContent=`資料更新 ${new Date(market.updatedAt).toLocaleString('zh-TW',{hour12:false})} · ${market.source}`;if(!quiet)notify(fromCache?'已載入快取淨值資料':'已同步一年淨值與配息紀錄');
+    }catch(err){
+      if(active===0){const hasSaved=marketHistoryLive.length>=60;dataMode=hasSaved?'cached':'demo';history=hasSaved?marketHistoryLive:[];dividends=hasSaved?distributionsLive:[];$('statusDot').className='status-dot';$('syncStatus').textContent=hasSaved?`即時更新失敗 · 顯示上次同步資料 ${funds[0].date}`:'無法連線 · 請確認本機同步服務';$('updatedAt').textContent=hasSaved?'使用最近一次已儲存的一年資料':'等待同步服務';calculate();}
+    }finally{busy=false}
+  }
   $('fundSelect').addEventListener('change',e=>{manualNav=false;setFund(Number(e.target.value));});
-  $('refreshBtn').addEventListener('click',sync);$('calculateBtn').addEventListener('click',()=>{calculate();notify(manualNav?'已更新盤中估值情境':'試算結果已更新');});
+  $('refreshBtn').addEventListener('click',()=>sync(false,false));$('calculateBtn').addEventListener('click',()=>{calculate();notify(manualNav?'已更新盤中估值情境':'試算結果已更新');});
   $('resetBtn').addEventListener('click',()=>{for(const id of ['capital','costNav']){localStorage.removeItem('northstar-'+id);$(id).value=''}$('manualMa').value='';manualNav=false;calculate();notify('已清除試算輸入');});
   document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{$('capital').value=b.dataset.capital;calculate()}));
   ['capital','costNav','currentNav','distribution','manualMa','exDate'].forEach(id=>$(id).addEventListener('input',()=>{if(id==='currentNav')manualNav=true;calculate()}));$('exDate').addEventListener('change',updateCountdown);
   document.querySelectorAll('#periodTabs button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#periodTabs button').forEach(x=>x.classList.toggle('active',x===b));period=b.dataset.period;drawChart()}));
-  async function checkScheduledUpdate(){try{const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)return;const status=await response.json();if(status.lastScheduledCheckAt&&status.lastScheduledCheckAt!==lastScheduleMarker){lastScheduleMarker=status.lastScheduledCheckAt;if(status.lastScheduledStatus==='updated')await sync(true);else if(status.lastScheduledStatus==='no-nav')$('syncStatus').textContent='今日尚無新淨值；排程稍後再檢查';else if(status.lastScheduledStatus==='error')$('syncStatus').textContent='18:00 來源暫時無回應；排程稍後重試';}}catch(_){}}
-  restoreInputs();history=demoHistory(funds[0]);dividends=[];calculate();
-  (async()=>{try{const r=await fetch('/api/status',{cache:'no-store'});if(r.ok){const s=await r.json();lastScheduleMarker=s.lastScheduledCheckAt||''}}catch(_){}await sync();setInterval(checkScheduledUpdate,60*1000)})();
+  async function checkScheduledUpdate(){try{const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)return;const status=await response.json();if(status.lastScheduledCheckAt&&status.lastScheduledCheckAt!==lastScheduleMarker){lastScheduleMarker=status.lastScheduledCheckAt;if(status.lastScheduledStatus==='updated')await sync(true,true,true);else if(status.lastScheduledStatus==='no-nav')$('syncStatus').textContent='今日尚無新淨值；排程稍後再檢查';else if(status.lastScheduledStatus==='error')$('syncStatus').textContent='18:00 來源暫時無回應；排程稍後重試';}}catch(_){}}
+  restoreInputs();history=[];dividends=[];calculate();
+  (async()=>{try{const r=await fetch('/api/status',{cache:'no-store'});if(r.ok){const s=await r.json();lastScheduleMarker=s.lastScheduledCheckAt||'';if(s.hasMarketCache)await sync(true,true)}}catch(_){}await sync(false,true);setInterval(checkScheduledUpdate,60*1000)})();
 </script>
 </body>
 </html>

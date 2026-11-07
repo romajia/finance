@@ -8,6 +8,7 @@ const path = require('node:path');
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
+const CACHE_FILE = path.join(ROOT, 'northstar-market-cache.json');
 const MARKET_SOURCE = 'https://pscnetsecrwd.moneydj.com/w/bcd/tBCDNavList.djbcd';
 const DISTRIBUTION_SOURCE = 'https://wmfund.entrust.com.tw/w/wr/wr10.djhtm?a=ACPS63-A07049';
 const cache = { market: null, dividends: null };
@@ -17,6 +18,26 @@ const scheduleState = {
   lastScheduledNavDate: null,
   lastScheduledStatus: 'waiting',
 };
+
+function restoreCache() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (Array.isArray(saved.market?.history) && saved.market.history.length >= 60) cache.market = saved.market;
+    if (Array.isArray(saved.dividends?.dividends)) cache.dividends = saved.dividends;
+  } catch (_) {
+    // The first launch has no saved market snapshot; the first page load fills it.
+  }
+}
+
+function persistCache() {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf8');
+  } catch (error) {
+    console.error(`[cache] unable to save snapshot: ${error.message}`);
+  }
+}
+
+restoreCache();
 
 function taipeiDate(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -81,6 +102,7 @@ async function loadMarket() {
   const sourceUrl = `${MARKET_SOURCE}?${params}`;
   const history = await marketData(sourceUrl);
   cache.market = { fund: 'ACPS63', history, source: 'MoneyDJ', sourceUrl, updatedAt: new Date().toISOString() };
+  persistCache();
   return cache.market;
 }
 
@@ -90,6 +112,7 @@ async function loadDividends() {
     fund: 'A07049', dividends, source: '統一基金平台',
     sourceUrl: DISTRIBUTION_SOURCE, updatedAt: new Date().toISOString(),
   };
+  persistCache();
   return cache.dividends;
 }
 
@@ -159,6 +182,8 @@ const server = http.createServer(async (req, res) => {
       nextScheduledAt: nextScheduledRun().toISOString(),
       ...scheduleState,
       lastSourceUpdateAt: cache.market?.updatedAt || null,
+      hasMarketCache: Boolean(cache.market?.history?.length),
+      hasDividendCache: Boolean(cache.dividends?.dividends),
     });
     return;
   }
@@ -166,8 +191,9 @@ const server = http.createServer(async (req, res) => {
     const fund = requestUrl.searchParams.get('fund') || 'ACPS63';
     if (fund !== 'ACPS63') return send(res, 400, { error: 'Live history is currently available for ACPS63 only.' });
     try {
-      const data = requestUrl.searchParams.get('cached') === '1' && cache.market ? cache.market : await loadMarket();
-      send(res, 200, data);
+      const cacheHit = requestUrl.searchParams.get('cached') === '1' && cache.market;
+      const data = cacheHit ? cache.market : await loadMarket();
+      send(res, 200, { ...data, cacheHit: Boolean(cacheHit) });
     } catch (error) {
       send(res, 502, { error: 'NAV sync failed', detail: error.message });
     }
@@ -177,8 +203,9 @@ const server = http.createServer(async (req, res) => {
     const fund = requestUrl.searchParams.get('fund') || 'A07049';
     if (fund !== 'A07049') return send(res, 400, { error: 'Distribution history is currently available for A07049 only.' });
     try {
-      const data = requestUrl.searchParams.get('cached') === '1' && cache.dividends ? cache.dividends : await loadDividends();
-      send(res, 200, data);
+      const cacheHit = requestUrl.searchParams.get('cached') === '1' && cache.dividends;
+      const data = cacheHit ? cache.dividends : await loadDividends();
+      send(res, 200, { ...data, cacheHit: Boolean(cacheHit) });
     } catch (error) {
       send(res, 502, { error: 'Distribution sync failed', detail: error.message });
     }
