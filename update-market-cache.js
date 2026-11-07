@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = __dirname;
 const CACHE_FILE = path.join(ROOT, 'northstar-market-cache.json');
 const MARKET_SOURCE = 'https://pscnetsecrwd.moneydj.com/w/bcd/tBCDNavList.djbcd';
 const DISTRIBUTION_SOURCE = 'https://wmfund.entrust.com.tw/w/wr/wr10.djhtm?a=ACPS63-A07049';

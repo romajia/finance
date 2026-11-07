@@ -205,7 +205,11 @@
       $('statusDot').className='status-dot'+(active===0&&!market.staticSnapshot?' live':'');$('syncStatus').textContent=active===0?(market.staticSnapshot?`已載入網站資料快照 ${funds[0].date} · 靜態頁模式`:market.cacheHit&&!freshSnapshot?`顯示上次同步資料 ${funds[0].date} · 正在更新`:`已載入 ${funds[0].date} 淨值 · ${market.history.length} 筆歷史`):'此基金顯示示意數據；高息基金已更新';
       $('updatedAt').textContent=`資料更新 ${new Date(market.updatedAt).toLocaleString('zh-TW',{hour12:false})} · ${market.source||'網站資料快照'}`;if(!quiet)notify(market.staticSnapshot?'已載入網站最新資料快照':fromCache?'已載入快取淨值資料':'已同步一年淨值與配息紀錄');
     }catch(err){
-      if(active===0){const hasSaved=marketHistoryLive.length>=60;dataMode=hasSaved?'cached':'demo';history=hasSaved?marketHistoryLive:[];dividends=hasSaved?distributionsLive:[];$('statusDot').className='status-dot';$('syncStatus').textContent=hasSaved?`即時更新失敗 · 顯示上次同步資料 ${funds[0].date}`:'無法連線 · 請確認本機同步服務';$('updatedAt').textContent=hasSaved?'使用最近一次已儲存的一年資料':'等待同步服務';calculate();}
+      if(active===0){
+        const hasSaved=marketHistoryLive.length>=60;dataMode=hasSaved?'cached':'demo';history=hasSaved?marketHistoryLive:[];dividends=hasSaved?distributionsLive:[];$('statusDot').className='status-dot';
+        $('syncStatus').textContent=hasSaved?`即時更新失敗 · 顯示上次同步資料 ${funds[0].date}`:String(err.message||'').includes('(404)')?'資料檔缺失：請確認網站根目錄有 northstar-market-cache.json':'資料載入失敗：請確認資料快照已部署';
+        $('updatedAt').textContent=hasSaved?'使用最近一次已儲存的一年資料':'資料快照尚未載入';calculate();
+      }
     }finally{busy=false}
   }
   $('fundSelect').addEventListener('change',e=>{manualNav=false;setFund(Number(e.target.value));});
